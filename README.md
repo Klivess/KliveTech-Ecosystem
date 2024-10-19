@@ -14,6 +14,9 @@ While writing code for the ESP32s I use within my gadgets, I find myself repeati
 4. It is super easy to enable my tech to be controlled remotely, typically through my [Klives Management](https://github.com/Klivess/Klives-Management-Website) website, as in execution, this only requires 2-3 lines in the Arduino project to set up. This makes it much quicker for me to make new stuff instead of wasting time writing/debugging microcontroller code.
 5. I can update this library to increase the functionality across all of my tech, such as Over-The-Air updating.
 
+# Code that lets this ecosystem work on Omnipotent
+https://github.com/Klivess/Omnipotent/blob/master/Omnipotent/Services/KliveTechHub/KliveTechHub.cs
+
 # Example of how I use this
 
 ![image](https://github.com/user-attachments/assets/7777e260-daf3-47cc-85ee-7aa47fcc0ee9)
