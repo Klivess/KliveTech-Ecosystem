@@ -27,3 +27,4 @@ https://github.com/Klivess/Omnipotent/blob/master/Omnipotent/Services/KliveTechH
 
 # Problems I need to fix
 1. Use of std::string in this library means that program memory gets sucked up fast, need to switch all string operations to memory-safe const char* operations.
+2. KliveTech loop and KliveTech actions do not execute asynchronous to main program code
