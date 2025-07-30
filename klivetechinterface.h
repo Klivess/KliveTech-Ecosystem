@@ -10,12 +10,14 @@ enum ActionParameterType
 {
     Integer,
     String,
-    Bool
+    Bool,
+    None
 };
 
 enum OperationNumber{
     ExecuteAction,
-    GetActions
+    GetActions,
+    Ping
 };
 
 struct Actions
@@ -26,6 +28,7 @@ struct Actions
     std::function<void(int)> intFunction;
     std::function<void(const char *)> StringFunction;
     std::function<void(bool)> BoolFunction;
+    std::function<void()> NoParamFunction;
 };
 struct OmnipotentResponse
 {
@@ -43,9 +46,11 @@ public:
 
     void CallLoop();
 
+
     void CreateActionWithIntegerParam(const char *actname, std::function<void(int)> func, const char *paramDescription);
     void CreateActionWithStringParam(const char *actname, std::function<void(const char *)> func, const char *paramDescription);
     void CreateActionWithBoolParam(const char *actname, std::function<void(bool)> func, const char *paramDescription);
+    void CreateActionWithNoParam(const char *actname, std::function<void()> func);
 
 private:
     vector<Actions> possibleActions;

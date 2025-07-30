@@ -4,6 +4,7 @@
 #include <regex>
 #include <cstdlib> // for atoi
 #include <cstring> // for strstr, strchr, strncpy
+#include "taskwrapper.h"
 
 using namespace std;
 void KliveTech::CreateKliveTechGadget(const char *name)
@@ -12,6 +13,13 @@ void KliveTech::CreateKliveTechGadget(const char *name)
     if (!SerialBT.begin(name))
     {
         Serial.println("An error occurred initialising Bluetooth.");
+        pinMode(2, OUTPUT);
+        while(true){
+            delay(500);
+            digitalWrite(2, HIGH);
+            delay(500);
+            digitalWrite(2, LOW);
+        }
     }
     else
     {
@@ -19,6 +27,18 @@ void KliveTech::CreateKliveTechGadget(const char *name)
         digitalWrite(2, HIGH);
         Serial.println("Bluetooth Set Up");
     }
+    xTaskCreate(
+        [](void *param)
+        {
+            static_cast<KliveTech *>(param)->CallLoop();
+        },                      /* Task function. */
+        "KliveTech Call Loop", /* name of task. */
+        1024 * 2,                  /* Stack size of task */
+        NULL,                  /* parameter of the task */
+        2,                     /* priority of the task */
+        NULL                   /* Task handle to keep track of created task */
+    );
+    Serial.println("KliveTech Gadget Created");
 }
 // FOR SOME REASON, THE NORMAL const char* == const char* DOESN'T WORK??? SO I HAVE TO MAKE THIS?? Whatever I don't even care enough
 static bool stringCompare(const char *one, const char *two)
@@ -28,89 +48,111 @@ static bool stringCompare(const char *one, const char *two)
 
 void KliveTech::CallLoop()
 {
-    auto comm = ReadCommand();
-    Serial.println("comm received: ");
-    OmnipotentResponse resp = DeserializeResponse(comm);
-    JsonDocument docResp;
-    JsonObject finalResp = docResp.to<JsonObject>();
-    Serial.print("ID: ");
-    Serial.println(resp.ID);
-    Serial.print("Data: ");
-    Serial.println(resp.data);
-    Serial.print("Operation: ");
-    Serial.println(resp.operation);
-    Serial.print("Response Expected: ");
-    Serial.println(resp.ResponseExpected);
-    if (resp.operation == GetActions)
+    // Indefinitely do this
+    for (;;)
     {
-        Serial.println("Get Actions Received");
+        auto comm = ReadCommand();
+        Serial.println("comm received: ");
+        OmnipotentResponse resp = DeserializeResponse(comm);
+        JsonDocument docResp;
+        JsonObject finalResp = docResp.to<JsonObject>();
+        Serial.print("ID: ");
+        Serial.println(resp.ID);
+        Serial.print("Data: ");
+        Serial.println(resp.data);
+        Serial.print("Operation: ");
+        Serial.println(resp.operation);
+        Serial.print("Response Expected: ");
+        Serial.println(resp.ResponseExpected);
+        if (resp.operation == GetActions)
+        {
+            Serial.println("Get Actions Received");
 
-        JsonArray actions = finalResp.createNestedArray("Actions");
-        for (size_t i = 0; i < possibleActions.size(); i++)
-        {
-            JsonObject action = actions.createNestedObject();
-            action["Name"] = possibleActions[i].name;
-            action["ParamDescription"] = possibleActions[i].paramDescription;
-            action["Type"] = possibleActions[i].type;
-        }
-        auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
-        SendData(formedResp);
-        return;
-    }
-    if (resp.operation == ExecuteAction)
-    {
-        Serial.println("Execute Action Received");
-        JsonDocument messageDoc;
-        deserializeJson(messageDoc, std::string(resp.data));
-        const char *actionName = messageDoc["ActionName"].as<const char *>();
-        // find the action
-        Actions *action = nullptr;
-        for (size_t i = 0; i < possibleActions.size(); i++)
-        {
-            if (stringCompare(possibleActions[i].name, actionName))
+            JsonArray actions = finalResp.createNestedArray("Actions");
+            for (size_t i = 0; i < possibleActions.size(); i++)
             {
-                action = &possibleActions[i];
-                break;
+                JsonObject action = actions.createNestedObject();
+                action["Name"] = possibleActions[i].name;
+                action["ParamDescription"] = possibleActions[i].paramDescription;
+                action["Type"] = possibleActions[i].type;
             }
-        }
-        // Check action type and execute corresponding function
-        if (action->type == ActionParameterType::Integer)
-        {
-            auto param = messageDoc["Param"].as<int>();
-            action->intFunction(param);
             auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
             SendData(formedResp);
+            return;
         }
-        else if (action->type == ActionParameterType::String)
+        if (resp.operation == ExecuteAction)
         {
-            auto param = messageDoc["Param"].as<const char *>();
-            action->StringFunction(param);
-            Serial.print("Executing ");
-            Serial.println(actionName);
+            Serial.println("Execute Action Received");
+            JsonDocument messageDoc;
+            deserializeJson(messageDoc, std::string(resp.data));
+            const char *actionName = messageDoc["ActionName"].as<const char *>();
+            // find the action
+            Actions *action = nullptr;
+            for (size_t i = 0; i < possibleActions.size(); i++)
+            {
+                if (stringCompare(possibleActions[i].name, actionName))
+                {
+                    action = &possibleActions[i];
+                    break;
+                }
+            }
+            // Check action type and execute corresponding function
+            if (action->type == ActionParameterType::Integer)
+            {
+                auto param = messageDoc["Param"].as<int>();
+                auto *taskData = new std::pair<std::function<void(int)>, int>(action->intFunction, param);
+                xTaskCreate(TaskWrapper::IntTask, "KliveTech Action", 1024, taskData, 1, NULL);
+                auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
+                SendData(formedResp);
+            }
+            else if (action->type == ActionParameterType::String)
+            {
+                auto param = messageDoc["Param"].as<const char *>();
+                auto *taskData = new std::pair<std::function<void(const char *)>, const char *>(action->StringFunction, param);
+                xTaskCreate(TaskWrapper::StringTask, "KliveTech Action", 1024, taskData, 1, NULL);
+                Serial.print("Executing ");
+                Serial.println(actionName);
+                auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
+                SendData(formedResp);
+            }
+            else if (action->type == ActionParameterType::Bool)
+            {
+                auto param = messageDoc["Param"].as<bool>();
+                Serial.print("Executing ");
+                Serial.println(actionName);
+                auto *taskData = new std::pair<std::function<void(bool)>, bool>(action->BoolFunction, param);
+                xTaskCreate(TaskWrapper::BoolTask, "KliveTech Action", 1024, taskData, 1, NULL);
+                auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
+                SendData(formedResp);
+            }
+            else if (action->type == ActionParameterType::None)
+            {
+                Serial.print("Executing ");
+                Serial.println(actionName);
+                auto *taskData = new std::function<void()>(action->NoParamFunction);
+                xTaskCreate(TaskWrapper::NoParamTask, "KliveTech Action", 1024, taskData, 1, NULL);
+                auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
+                SendData(formedResp);
+            }
+            else
+            {
+                auto formedResp = FormulateResponse(resp.ID, finalResp, "500", "false");
+                SendData(formedResp);
+            }
+            return;
+        }
+        if (resp.operation == Ping)
+        {
             auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
             SendData(formedResp);
+            return;
         }
-        else if (action->type == ActionParameterType::Bool)
-        {
-            auto param = messageDoc["Param"].as<bool>();
-            Serial.print("Executing ");
-            Serial.println(actionName);
-            action->BoolFunction(param);
-            auto formedResp = FormulateResponse(resp.ID, finalResp, "200", "false");
-            SendData(formedResp);
-        }
-        else
+        Serial.println("No Command");
+        if (resp.ResponseExpected == true)
         {
             auto formedResp = FormulateResponse(resp.ID, finalResp, "500", "false");
             SendData(formedResp);
         }
-        return;
-    }
-    Serial.println("No Command");
-    if (resp.ResponseExpected == true)
-    {
-        auto formedResp = FormulateResponse(resp.ID, finalResp, "500", "false");
-        SendData(formedResp);
     }
 }
 OmnipotentResponse KliveTech::DeserializeResponse(const char *message)
@@ -218,5 +260,14 @@ void KliveTech::CreateActionWithBoolParam(const char *actname, std::function<voi
     action.name = actname;
     action.BoolFunction = func;
     action.paramDescription = paramDesc;
+    this->possibleActions.emplace_back(action);
+}
+
+void KliveTech::CreateActionWithNoParam(const char *actname, std::function<void()> func)
+{
+    Actions action;
+    action.type = ActionParameterType::None;
+    action.name = actname;
+    action.NoParamFunction = func;
     this->possibleActions.emplace_back(action);
 }
